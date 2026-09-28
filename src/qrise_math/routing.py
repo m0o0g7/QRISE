@@ -25,13 +25,12 @@ except ImportError:  # Python 3.7, used by the existing NetSquid environment.
         """Exact binomial coefficient for the nonnegative Q-CAST counts."""
         return factorial(n) // (factorial(k) * factorial(n - k))
 
+
 import networkx as nx
 
 from .physics import (
-    bbpssw_once,
     chain_link_guard,
     equal_link_guard,
-    mcsfm,
     minimum_rounds,
     stored_fidelity,
 )
@@ -50,8 +49,6 @@ class Config:
     gamma: float = 1000.0
     delta: float = 0.02
     attempts_per_lane_slot: int = 3  # Source rate limit; herald waiting also applies.
-    fixed_extra_rounds: int = 3  # Legacy scalar reference only.
-    recovery_resource_fraction: float = 0.25  # Legacy scalar recovery accounting only.
 
     # Path MPR is the default. Fixed rounds are an explicit sensitivity control.
     baseline_mode: str = "path_mpr"
@@ -59,8 +56,6 @@ class Config:
     qrise_floor_base: float = 0.960
     qrise_floor_target_weight: float = 0.025
     guard_margin: float = 0.004
-    # Profiles can enable shared floors, predictive guards and reachability.
-    # The defaults preserve the reference planning assumptions.
     baseline_fidelity_filter: bool = True
     baseline_guard_floor: bool = False
     qrise_guard_mode: str = "equal"
@@ -78,7 +73,10 @@ class Config:
             raise ValueError("Unknown baseline purification mode")
         if not 0 <= self.baseline_fixed_rounds <= 12:
             raise ValueError("Fixed rounds must be between 0 and 12")
-        if not 0 <= self.qrise_floor_base <= 1 or not 0 <= self.qrise_floor_target_weight <= 1 - self.qrise_floor_base:
+        if (
+            not 0 <= self.qrise_floor_base <= 1
+            or not 0 <= self.qrise_floor_target_weight <= 1 - self.qrise_floor_base
+        ):
             raise ValueError("Q-RISE local floor must stay within [0, 1]")
         if not 0 <= self.guard_margin < 0.1:
             raise ValueError("Guard margin must be in [0, .1)")
@@ -169,9 +167,7 @@ def _path_candidates(topology, slot: int, cfg: Config, limit: int = 40):
 def _qcast_ext(topology, path: list[int], slot: int, cfg: Config) -> float:
     """Evaluate the Q-CAST expected-throughput (EXT) path metric."""
 
-    width = min(
-        topology.edge(u, v).width for u, v in zip(path, path[1:])
-    )
+    width = min(topology.edge(u, v).width for u, v in zip(path, path[1:]))
     probabilities = [
         _observed_state(topology, u, v, slot, cfg)["generation_p"]
         for u, v in zip(path, path[1:])
@@ -207,9 +203,7 @@ def _select_baseline_path(topology, policy: str, slot: int, cfg: Config):
                 sum(
                     log(
                         max(
-                            _observed_state(topology, u, v, slot, cfg)[
-                                "generation_p"
-                            ],
+                            _observed_state(topology, u, v, slot, cfg)["generation_p"],
                             1e-12,
                         )
                     )
@@ -260,14 +254,18 @@ def predicted_state(topology, u: int, v: int, slot: float, cfg: Config) -> dict:
     """Observed state whose fidelity is the worst forecast over the lookahead.
 
     This synthetic trace is assumed known. It is not a measured ephemeris or
-    a forecast of random quantum outcomes; forecast error is not modeled. With zero lookahead this is the v1 state.
+    a forecast of random quantum outcomes; forecast error is not modeled.
+    Zero lookahead uses the current observed fidelity.
     """
     state = _observed_state(topology, u, v, slot, cfg)
     if cfg.qrise_lookahead_slots > 0:
         steps = max(1, int(round(cfg.qrise_lookahead_slots)))
         state["fidelity"] = min(
-            _observed_state(topology, u, v, slot + cfg.qrise_lookahead_slots * k / steps, cfg)["fidelity"]
-            for k in range(steps + 1))
+            _observed_state(
+                topology, u, v, slot + cfg.qrise_lookahead_slots * k / steps, cfg
+            )["fidelity"]
+            for k in range(steps + 1)
+        )
     return state
 
 
@@ -287,40 +285,66 @@ def forward_hops(topology, slot: float, cfg: Config, blocked=None) -> dict:
                 continue
             if _valid_state(predicted_state(topology, u, v, slot, cfg), cfg):
                 admitted.add_edge(u, v)
-    return dict(nx.single_source_shortest_path_length(
-        admitted.reverse(copy=False), topology.destination))
+    return dict(
+        nx.single_source_shortest_path_length(
+            admitted.reverse(copy=False), topology.destination
+        )
+    )
 
 
-def qrise_rounds(topology, path, peer, state, target, cfg, chain_fidelity=None, remaining_hops=None):
+def qrise_rounds(
+    topology, path, peer, state, target, cfg, chain_fidelity=None, remaining_hops=None
+):
     """Plan local MPR using the declared floor and E2E guard assumptions."""
     if remaining_hops is None:
-        remaining_hops = nx.shortest_path_length(topology.graph, peer, topology.destination)
+        remaining_hops = nx.shortest_path_length(
+            topology.graph, peer, topology.destination
+        )
     estimated_horizon = len(path) + remaining_hops
     local_floor = cfg.qrise_floor_base + cfg.qrise_floor_target_weight * target
     if cfg.qrise_guard_mode == "chain":
-        inferred_guard = chain_link_guard(chain_fidelity, target, 1 + remaining_hops,
-                                          cfg.swap_fidelity, margin=cfg.guard_margin)
+        inferred_guard = chain_link_guard(
+            chain_fidelity,
+            target,
+            1 + remaining_hops,
+            cfg.swap_fidelity,
+            margin=cfg.guard_margin,
+        )
     else:
-        inferred_guard = equal_link_guard(target, max(1, estimated_horizon), cfg.swap_fidelity, margin=cfg.guard_margin)
+        inferred_guard = equal_link_guard(
+            target,
+            max(1, estimated_horizon),
+            cfg.swap_fidelity,
+            margin=cfg.guard_margin,
+        )
     guard = max(local_floor, inferred_guard)
     rounds, predicted = minimum_rounds(state["fidelity"], guard)
     return rounds, predicted, guard
+
 
 def baseline_plan(topology, policy, target, cfg):
     """Select the original adapter path, then apply the declared round rule."""
     # A fidelity-unaware adapter may admit purifiable low-F links.
     # This is an adapter assumption, not a claim about every original baseline.
-    # A shared-filter control can restore the stronger previous baseline.
     select_cfg = cfg if cfg.baseline_fidelity_filter else replace(cfg, f_base=0.0)
     path = _select_baseline_path(topology, policy, slot=0, cfg=select_cfg)
     if path is None:
         return None
-    guard = equal_link_guard(target, len(path) - 1, cfg.swap_fidelity, margin=cfg.guard_margin)
+    guard = equal_link_guard(
+        target, len(path) - 1, cfg.swap_fidelity, margin=cfg.guard_margin
+    )
     if cfg.baseline_guard_floor:
-        guard = max(guard, cfg.qrise_floor_base + cfg.qrise_floor_target_weight * target)
-    nominal_fidelity = min(_observed_state(topology, u, v, 0, cfg)["fidelity"]
-                           for u, v in zip(path, path[1:]))
+        guard = max(
+            guard, cfg.qrise_floor_base + cfg.qrise_floor_target_weight * target
+        )
+    nominal_fidelity = min(
+        _observed_state(topology, u, v, 0, cfg)["fidelity"]
+        for u, v in zip(path, path[1:])
+    )
     # Apply MPR without additive rounds or a mandatory minimum.
-    fixed_rounds = (cfg.baseline_fixed_rounds if cfg.baseline_mode == "fixed"
-                    else minimum_rounds(nominal_fidelity, guard)[0])
+    fixed_rounds = (
+        cfg.baseline_fixed_rounds
+        if cfg.baseline_mode == "fixed"
+        else minimum_rounds(nominal_fidelity, guard)[0]
+    )
     return path, fixed_rounds, guard

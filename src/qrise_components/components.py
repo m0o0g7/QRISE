@@ -2,10 +2,22 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
-from netsquid.components import QSource, QuantumChannel, ClassicalChannel, QuantumProcessor, PhysicalInstruction
+from netsquid.components import (
+    QSource,
+    QuantumChannel,
+    ClassicalChannel,
+    QuantumProcessor,
+    PhysicalInstruction,
+)
 from netsquid.components.qsource import SourceStatus
 from netsquid.components.models.qerrormodels import QuantumErrorModel, DepolarNoiseModel
-from netsquid.components.instructions import INSTR_CNOT, INSTR_H, INSTR_MEASURE, INSTR_X, INSTR_Z
+from netsquid.components.instructions import (
+    INSTR_CNOT,
+    INSTR_H,
+    INSTR_MEASURE,
+    INSTR_X,
+    INSTR_Z,
+)
 from netsquid.qubits import qubitapi as qapi, ketstates as ks
 from netsquid.qubits.operators import Operator
 from netsquid.qubits.state_sampler import StateSampler
@@ -16,6 +28,7 @@ from qrise_math.physics import C_KM_S
 @dataclass(frozen=True)
 class Pair:
     """Two allocated memory positions, one at each endpoint."""
+
     u: int
     a: int
     v: int
@@ -30,6 +43,7 @@ def werner(fidelity):
 
 class CaptureLoss(QuantumErrorModel):
     """Apply capture probability once, to the travelling half."""
+
     def __init__(self):
         super().__init__()
         self.probability = 1.0
@@ -40,22 +54,45 @@ class CaptureLoss(QuantumErrorModel):
 
 
 def make_processor(node, positions, optical, device):
-    memory = [DepolarNoiseModel(depolar_rate=optical.damping_rate_s * device.memory_rate_scale)
-              for _ in range(positions)]
+    memory = [
+        DepolarNoiseModel(
+            depolar_rate=optical.damping_rate_s * device.memory_rate_scale
+        )
+        for _ in range(positions)
+    ]
     instructions = []
-    for instruction, duration in ((INSTR_CNOT, device.cnot_ns), (INSTR_H, device.single_gate_ns),
-                                  (INSTR_X, device.single_gate_ns), (INSTR_Z, device.single_gate_ns),
-                                  (INSTR_MEASURE, device.measurement_ns)):
-        noise = (DepolarNoiseModel(depolar_rate=device.gate_depolar_probability, time_independent=True)
-                 if device.gate_depolar_probability else None)
-        instructions.append(PhysicalInstruction(instruction, duration=duration, quantum_noise_model=noise))
+    for instruction, duration in (
+        (INSTR_CNOT, device.cnot_ns),
+        (INSTR_H, device.single_gate_ns),
+        (INSTR_X, device.single_gate_ns),
+        (INSTR_Z, device.single_gate_ns),
+        (INSTR_MEASURE, device.measurement_ns),
+    ):
+        noise = (
+            DepolarNoiseModel(
+                depolar_rate=device.gate_depolar_probability, time_independent=True
+            )
+            if device.gate_depolar_probability
+            else None
+        )
+        instructions.append(
+            PhysicalInstruction(
+                instruction, duration=duration, quantum_noise_model=noise
+            )
+        )
     # Each node has a finite number of physically allocated memory positions.
-    return QuantumProcessor("node-{}".format(node), num_positions=positions,
-                            mem_noise_models=memory, phys_instructions=instructions, fallback_to_nonphysical=False)
+    return QuantumProcessor(
+        "node-{}".format(node),
+        num_positions=positions,
+        mem_noise_models=memory,
+        phys_instructions=instructions,
+        fallback_to_nonphysical=False,
+    )
 
 
 class Lane:
     """One source and quantum channel, with classical herald return."""
+
     def __init__(self, network, u, v, index):
         self.net, self.u, self.v = network, u, v
         self.pair = None
@@ -64,10 +101,18 @@ class Lane:
         self.available_ns = 0.0
         name = "{}-{}-{}".format(u, v, index)
         self.loss = CaptureLoss()
-        self.source = QSource("source-" + name, state_sampler=StateSampler([werner(1)], [1]),
-                              num_ports=2, status=SourceStatus.EXTERNAL)
-        self.channel = QuantumChannel("quantum-" + name, delay=1, transmit_empty_items=True,
-                                      models={"quantum_loss_model": self.loss})
+        self.source = QSource(
+            "source-" + name,
+            state_sampler=StateSampler([werner(1)], [1]),
+            num_ports=2,
+            status=SourceStatus.EXTERNAL,
+        )
+        self.channel = QuantumChannel(
+            "quantum-" + name,
+            delay=1,
+            transmit_empty_items=True,
+            models={"quantum_loss_model": self.loss},
+        )
         self.herald = ClassicalChannel("herald-" + name, delay=1)
         self.source.ports["qout0"].bind_output_handler(self.local_arrival)
         self.source.ports["qout1"].connect(self.channel.ports["send"])
@@ -100,7 +145,10 @@ class Lane:
         # Forecast aging belongs to planning. Physical memory aging starts
         # at emission, so it must not be included in the source state twice.
         self.source.state_sampler = StateSampler([werner(state["fidelity"])], [1])
-        self.available_ns = ns.sim_time() + self.net.cfg.slot_s * 1e9 / self.net.cfg.attempts_per_lane_slot
+        self.available_ns = (
+            ns.sim_time()
+            + self.net.cfg.slot_s * 1e9 / self.net.cfg.attempts_per_lane_slot
+        )
         self.net.stats["generation_attempts"] += 1
         self.source.trigger()
 
@@ -119,7 +167,10 @@ def _twirl_operators():
         found.append(u)
         pending.extend((h @ u, s @ u))
     assert len(found) == 24
-    return tuple(Operator("twirl-{}".format(i), np.kron(u, u.conj())) for i, u in enumerate(found))
+    return tuple(
+        Operator("twirl-{}".format(i), np.kron(u, u.conj()))
+        for i, u in enumerate(found)
+    )
 
 
 TWIRL_OPERATORS = _twirl_operators()
@@ -131,5 +182,6 @@ class BilateralTwirl(QuantumErrorModel):
     Ideal instantaneous twirling with shared randomness is an explicit common
     device assumption. No scalar fidelity is read to construct the output.
     """
+
     def error_operation(self, qubits, **kwargs):
         qapi.multi_operate(qubits, TWIRL_OPERATORS, weights=(1 / 24,) * 24)

@@ -1,10 +1,17 @@
 """Physical programs executed on the same processors for every policy."""
 from netsquid.components import QuantumProgram
-from netsquid.components.instructions import INSTR_CNOT, INSTR_H, INSTR_MEASURE, INSTR_X, INSTR_Z
+from netsquid.components.instructions import (
+    INSTR_CNOT,
+    INSTR_H,
+    INSTR_MEASURE,
+    INSTR_X,
+    INSTR_Z,
+)
 
 
 class PurifyProgram(QuantumProgram):
     """One endpoint of bilateral BBPSSW; pair 0 is retained."""
+
     default_num_qubits = 2
 
     def program(self):
@@ -16,6 +23,7 @@ class PurifyProgram(QuantumProgram):
 
 class SwapProgram(QuantumProgram):
     """Bell measurement; H-side bit requests Z, other bit requests X."""
+
     default_num_qubits = 2
 
     def program(self):
@@ -29,10 +37,11 @@ class SwapProgram(QuantumProgram):
 
 class CorrectProgram(QuantumProgram):
     """Apply correction received over the classical channel."""
+
     default_num_qubits = 1
 
     def program(self, x=0, z=0):
-        q, = self.get_qubit_indices(1)
+        (q,) = self.get_qubit_indices(1)
         if x:
             self.apply(INSTR_X, q)
         if z:

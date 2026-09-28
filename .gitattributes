@@ -1,0 +1,10 @@
+# Consistent text checkout for editable project files.
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+
+# Preserve exact bytes for frozen experiment provenance.
+/outputs/**/source_snapshot/** -text
+/outputs/**/results.json -text

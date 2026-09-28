@@ -2,6 +2,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 .venv/
@@ -17,11 +19,5 @@ dist/
 *.log
 *.tmp
 
-# New experiments are local by default. Keep published datasets with snapshots.
-/outputs/*
-!/outputs/README.md
-!/outputs/mechanism_55/
-!/outputs/mechanism_550/
-!/outputs/review_final_165/
-!/outputs/review_final_shared_15/
-!/outputs/review_final_e2e_30/
+# Generated experiments are local unless explicitly selected for publication.
+/outputs/

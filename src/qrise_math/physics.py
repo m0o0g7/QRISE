@@ -35,7 +35,7 @@ class OpticalModel:
     # Shared source calibration changes emitted states, not measured outputs.
     source_fidelity_offset: float = 0.0
     # Persistent quality offsets model a declared fraction of degraded links.
-    # The defaults disable heterogeneity; profiles can enable it for all policies.
+    # The defaults disable heterogeneity.
     degraded_link_fraction: float = 0.0
     degraded_offset_min: float = -0.10
     degraded_offset_max: float = -0.04
@@ -47,11 +47,21 @@ class OpticalModel:
     quality_period_slots: float | None = None
 
     def __post_init__(self):
-        if self.quality_period_slots is not None and (not isfinite(self.quality_period_slots) or self.quality_period_slots <= 0):
+        if self.quality_period_slots is not None and (
+            not isfinite(self.quality_period_slots) or self.quality_period_slots <= 0
+        ):
             raise ValueError("Quality period must be finite and positive")
-        if not all(isfinite(v) for v in (self.source_fidelity_offset, self.degraded_link_fraction,
-            self.degraded_offset_min, self.degraded_offset_max, self.phase_fidelity_amplitude,
-            self.dynamics_period_slots)):
+        if not all(
+            isfinite(v)
+            for v in (
+                self.source_fidelity_offset,
+                self.degraded_link_fraction,
+                self.degraded_offset_min,
+                self.degraded_offset_max,
+                self.phase_fidelity_amplitude,
+                self.dynamics_period_slots,
+            )
+        ):
             raise ValueError("Optical calibration inputs must be finite")
         if not -0.1 <= self.source_fidelity_offset <= 0.05:
             raise ValueError("Source fidelity offset must be between -.1 and .05")
@@ -75,27 +85,23 @@ def capture_probability(distance_km: float, model: OpticalModel) -> float:
 
     distance_m = distance_km * 1000.0
     geometric_capture = 1.0 - exp(
-        -2.0 * model.aperture_m**2
-        / (model.divergence_rad**2 * distance_m**2)
+        -2.0 * model.aperture_m**2 / (model.divergence_rad**2 * distance_m**2)
     )
-    pointing_penalty = (
-        4.0 * model.pointing_sigma_rad**2 / model.divergence_rad**2
-    )
+    pointing_penalty = 4.0 * model.pointing_sigma_rad**2 / model.divergence_rad**2
     return geometric_capture / (1.0 + pointing_penalty)
 
 
 def gao_initial_fidelity(distance_km: float, model: OpticalModel) -> float:
     """Evaluate the unmodified Gao v1 elementary-link fidelity equations.
 
-    The value is retained as a diagnostic.  It is intentionally not substituted
-    for the effective poster calibration because doing so cannot simultaneously
-    reproduce the poster's high E2E fidelity and moderate EPR usage.
+    Retained for diagnostics. With the declared optical inputs, this predicts
+    lower initial fidelity and substantially higher purification requirements
+    than the high-quality source hypothesis used by the mechanism profile.
     """
 
     distance_m = distance_km * 1000.0
     capture = 1.0 - exp(
-        -2.0 * model.aperture_m**2
-        / (model.divergence_rad**2 * distance_m**2)
+        -2.0 * model.aperture_m**2 / (model.divergence_rad**2 * distance_m**2)
     )
     transmission_s = distance_km / C_KM_S
     rotation_angle = (
@@ -104,9 +110,7 @@ def gao_initial_fidelity(distance_km: float, model: OpticalModel) -> float:
         / (model.earth_radius_km + model.altitude_km)
     )
     rotation = 0.5 * (
-        1.0
-        + cos(2.0 * rotation_angle)
-        * exp(-2.0 * model.rotation_sigma_rad**2)
+        1.0 + cos(2.0 * rotation_angle) * exp(-2.0 * model.rotation_sigma_rad**2)
     )
     channel = (capture + (1.0 - capture) * model.qber) / (
         1.0 + 3.0 * (1.0 - capture) * model.qber
@@ -114,8 +118,9 @@ def gao_initial_fidelity(distance_km: float, model: OpticalModel) -> float:
     return rotation * channel
 
 
-def effective_routing_fidelity(distance_km: float, phase: float,
-                               phase_amplitude: float = 0.004) -> float:
+def effective_routing_fidelity(
+    distance_km: float, phase: float, phase_amplitude: float = 0.004
+) -> float:
     """Return the declared elementary-fidelity reconstruction hypothesis.
 
     The Q-RISE poster omits its source/channel calibration.  This function uses
@@ -164,9 +169,7 @@ def bbpssw_once(fidelity: float) -> tuple[float, float]:
     """
 
     error = (1.0 - fidelity) / 3.0
-    keep_probability = (
-        fidelity**2 + 2.0 * fidelity * error + 5.0 * error**2
-    )
+    keep_probability = fidelity**2 + 2.0 * fidelity * error + 5.0 * error**2
     output_fidelity = (fidelity**2 + error**2) / keep_probability
     return output_fidelity, keep_probability
 
@@ -222,7 +225,6 @@ def equal_link_guard(
     return upper
 
 
-
 def chain_link_guard(
     chain_fidelity: float | None,
     target: float,
@@ -241,7 +243,7 @@ def chain_link_guard(
 
     if hops < 1 or not 0 < target < 1 or not 0 < swap_fidelity <= 1:
         raise ValueError("Invalid chain guard request")
-    if chain_fidelity is not None and not .25 <= chain_fidelity <= 1:
+    if chain_fidelity is not None and not 0.25 <= chain_fidelity <= 1:
         raise ValueError("Invalid predicted chain fidelity")
     wanted = min(0.999, target + margin)
 
@@ -271,6 +273,10 @@ def stored_werner_fidelity(initial: float, elapsed_s: float, rate_s: float) -> f
     This is a planner estimate, never assigned to the actual quantum state.
     Unlike Gao's F exp(-2 Gamma t), depolarization tends to the mixed-state .25.
     """
-    if not all(isfinite(v) for v in (initial, elapsed_s, rate_s)) or elapsed_s < 0 or rate_s < 0:
+    if (
+        not all(isfinite(v) for v in (initial, elapsed_s, rate_s))
+        or elapsed_s < 0
+        or rate_s < 0
+    ):
         raise ValueError("Invalid memory prediction parameters")
-    return .25 + (initial - .25) * exp(-2 * rate_s * elapsed_s)
+    return 0.25 + (initial - 0.25) * exp(-2 * rate_s * elapsed_s)

@@ -36,7 +36,7 @@ class Link:
     period_slots: float = 420.0
 
     def distance(self, slot: float) -> float:
-        """Return distance at one slot; state is frozen inside the slot."""
+        """Return the synthetic distance at the given simulation slot."""
 
         # The 420-slot period and 1.7 km amplitude are reconstruction inputs,
         # not values recovered from the unpublished Q-RISE simulator.
@@ -73,9 +73,12 @@ class Topology:
         # Planning and QSource use the same calibrated quality curve.
         # Apply persistent degradation after the curve clamp so links may fall
         # below the admission threshold while remaining purifiable (F >= .55).
-        fidelity = effective_routing_fidelity(
-            distance, dynamic_phase, self.optical.phase_fidelity_amplitude
-        ) + self.optical.source_fidelity_offset
+        fidelity = (
+            effective_routing_fidelity(
+                distance, dynamic_phase, self.optical.phase_fidelity_amplitude
+            )
+            + self.optical.source_fidelity_offset
+        )
         if link.quality_offset:
             fidelity = max(0.55, fidelity + link.quality_offset)
         return {
@@ -125,9 +128,7 @@ def make_topology(n: int, seed: int, optical: OpticalModel = None) -> Topology:
     for layer_index, nodes in enumerate(groups, start=1):
         for rank, node in enumerate(nodes):
             y_position = (
-                0.0
-                if len(nodes) == 1
-                else -15.0 + 30.0 * rank / (len(nodes) - 1)
+                0.0 if len(nodes) == 1 else -15.0 + 30.0 * rank / (len(nodes) - 1)
             )
             positions[node] = (45.0 * layer_index, y_position)
 
@@ -167,11 +168,16 @@ def make_topology(n: int, seed: int, optical: OpticalModel = None) -> Topology:
         quality_rng = np.random.default_rng([seed, 2])
         for key in sorted(links):
             degraded = quality_rng.random() < optical.degraded_link_fraction
-            offset = float(quality_rng.uniform(optical.degraded_offset_min,
-                                               optical.degraded_offset_max))
-            links[key] = replace(links[key],
-                                 quality_offset=offset if degraded else 0.0,
-                                 period_slots=optical.dynamics_period_slots)
+            offset = float(
+                quality_rng.uniform(
+                    optical.degraded_offset_min, optical.degraded_offset_max
+                )
+            )
+            links[key] = replace(
+                links[key],
+                quality_offset=offset if degraded else 0.0,
+                period_slots=optical.dynamics_period_slots,
+            )
     if not nx.has_path(graph, source, destination):
         raise AssertionError("constructed grid must connect both endpoints")
 
@@ -184,4 +190,3 @@ def make_topology(n: int, seed: int, optical: OpticalModel = None) -> Topology:
         destination=destination,
         optical=optical,
     )
-
