@@ -1,0 +1,27 @@
+# Python caches, environments and build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Local editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+*.log
+*.tmp
+
+# New experiments are local by default. Keep published datasets with snapshots.
+/outputs/*
+!/outputs/README.md
+!/outputs/mechanism_55/
+!/outputs/mechanism_550/
+!/outputs/review_final_165/
+!/outputs/review_final_shared_15/
+!/outputs/review_final_e2e_30/
